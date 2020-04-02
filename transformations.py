@@ -67,7 +67,12 @@ def apply_transforms(dataset, transforms):
     data = dataset.copy()
     for transform in transforms:
         func = getattr(sys.modules[__name__], transform['func'])
-        data[transform['output']] = func(data[transform['input']], **transform['params'])
+        if isinstance(transform['output'], list):
+            outputs = func(data[transform['input']], **transform['params'])
+            for i in range(len(transform['output'])):
+                data[transform['output'][i]] = output[:, i]
+        else:
+            data[transform['output']] = func(data[transform['input']], **transform['params'])
         if transform['drop_input'] and transform['output'] != transform['input']:
             data = data.drop(columns=transform['input'])
     return data
@@ -176,4 +181,85 @@ def get_ihs_transforms_for_dataset(data, skew_threshold=1.14, kurtosis_threshold
                 )
     
     return transforms
+
+def get_bspline_transform(x, col_name, df=4, degree=3, include_intercept=False):
+    n_knots = df - degree - 1
+    if not include_intercept:
+        n_knots += 1
+    
+    output = ['{}_s{}'.format(col_name, i) for i in range(df)]
+    knots = [np.percentile(x, 100 * prob) for prob in np.linspace(0, 1, n_knots + 2)[1:-1]]
+    transform = get_transform(
+                    output,
+                    col_name,
+                    'b_spline',
+                    params= {
+                        'knots':knots,
+                        'degree':degree,
+                        'upper_bound':x.max(),
+                        'lower_bound':x.min(),
+                        'include_intercept':include_intercept
+                    },
+                    drop_input=False
+                )
+    return transform
+
+def get_bspline_transforms_for_dataset(data, df=4, degree=3, include_cols=[], exclude_cols=[]):
+    transforms = []
+    
+    if len(include_cols) == 0:
+        for col_name in list(data):
+            if data[col_name].dtype != 'object':
+                if len(data[col_name].unique()) > 50:
+                    include_cols.append(col_name)
+                    
+    for col_name in include_cols:
+        if col_name not in exclude_cols:
+            transforms.append(
+                get_bspline_transform(
+                    data[col_name].
+                    col_name,
+                    df,
+                    degree,
+                    False
+                )
+            )
+    return transforms
+
+def b_spline(x, knots, degree, upper_bound, lower_bound, include_intercept):
+    patsy_formula = "bs(x, knots={}, degree={}, upper_bound={}, lower_bound={}, include_intercept={})-1"
+    design_matrix = patsy.dmatrix(
+                        patsy_formula.format(
+                            knots,
+                            degree,
+                            upper_bound,
+                            lower_bound,
+                            include_intercept
+                        ), 
+                        {"x": x}
+                    )
+    return np.asarray(design_matrix)
+
+def get_group_dict(transforms):
+    group_dict = {}
+    for transform in transforms:
+        if transform['func'] == 'b_spline':
+            group_dict[col_name] = transform['output']
+    return group_dict
+
+def get_group_matrix(data, group_dict):
+    n = data.shape[1]
+    idx_map = dict(zip(list(data), list(range(n))))
+    group_matrix = np.eye(n)
+    
+    for col_name in group_dict.keys():
+        group = [idx_map[col] for col in group_dict[col_name]]
+        group_matrix[idx_map[col_name] group] = 1
+    return group_matrix
+        
+
+
+                       
+    
+        
          
