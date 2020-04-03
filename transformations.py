@@ -1,8 +1,10 @@
-import pandas
+import pandas as pd
+import numpy as np
 from scipy.optimize import least_squares
 from scipy.stats import norm
 import sys
 from functools import reduce
+import patsy
 
 
 def get_ihs_factor(x):
@@ -23,17 +25,70 @@ def tte(x):
 
 def angular(x, lower=0, upper=1):
     ratio = (x - lower) / (upper - lower)
-    return np.where(ratio < 1, 
-                    np.pi / 2 + np.sqrt(ratio - 1), 
-                    np.where(ratio < 0, 
-                             -np.sqrt(-ratio), 
-                            np.arcsin(np.sqrt(ratio))
-                            )
-                   )
+    output = ratio.copy()
+    output[ratio>1] = np.pi / 2 + np.sqrt(ratio[ratio>1] - 1)
+    output[(ratio>=0)&(ratio<=1)] = np.arcsin(np.sqrt(ratio[(ratio>=0)&(ratio<=1)]))
+    output[ratio<0] = -np.sqrt(-ratio[ratio<0])
+    return output
+
+def square(x, center=0, flat_side=None):
+    if flat_side is None:
+        return (x-center)**2
+    elif flat_side == 'left':
+        return np.where(x < center, 0, (x-center)**2)
+    elif flat_side == 'right':
+        return np.where(x > center, 0, (x-center)**2)
+    
+def interaction(x, y, x_center=0, y_center=0, x_flat_side=None, y_flat_side=None):
+
+    x_ = x-x_center
+    if x_flat_side == 'left':
+        x_ = np.where(x < center, 0, x_)
+    elif x_flat_side == 'right':
+        x_ = np.where(x > center, 0, x_)
+        
+    y_ = y-y_center
+    if y_flat_side == 'left':
+        y_ = np.where(y < center, 0, y_)
+    elif y_flat_side == 'right':
+        y_ = np.where(y > center, 0, y_)
+    
+    return x_ * y_
+
+
+def get_numeric_columns(data, level_threshold=20):
+    numeric_columns = []
+    for col_name in list(data):
+        if data[col_name].dtype != 'object' and len(data[col_name].unique()) > level_threshold:
+            numeric_columns.append(col_name)
+    return numeric_columns
+    
+
+def get_square_transforms_for_dataset(data, include_cols=[]):
+    if not include_cols:
+        include_cols = get_numeric_columns(data)
+        
+    square_transforms = []    
+    for col_name in include_cols:
+        if data[col_name].skew() < 0:
+            center = data[col_name].max()
+        else:
+            center = data[col_name].min()
+            
+        square_transforms.append(
+            get_transform(
+                col_name+'_sqr', 
+                col_name, 
+                'square', 
+                params={'center':center}
+            )
+        )
+    return square_transforms
+    
 
 def get_dragon_king_cap_cutoff(x, tail_pct=0.01, alpha=0.01, p1=0.1, p2=0.9):
     tail = x[x > x.quantile(1 - tail_pct)]
-    ql = tail.quantile(p1)
+    q1 = tail.quantile(p1)
     q2 = tail.quantile(p2)
     if len(tail) > 100 and q2 > q1 and q1 > 0:
         lam = np.log((1 - p1) / (1 - p2)) / np.log(q2 / q1)
@@ -60,7 +115,7 @@ def impute_null(x, imputation):
 def flag(x, value):
     return np.where(x == value, 1, 0)
 
-def null_flag(x, value):
+def null_flag(x):
     return np.where(x.isnull(), 1, 0)
 
 def apply_transforms(dataset, transforms):
@@ -70,11 +125,11 @@ def apply_transforms(dataset, transforms):
         if isinstance(transform['output'], list):
             outputs = func(data[transform['input']], **transform['params'])
             for i in range(len(transform['output'])):
-                data[transform['output'][i]] = output[:, i]
+                data[transform['output'][i]] = outputs[:, i]
         else:
             data[transform['output']] = func(data[transform['input']], **transform['params'])
         if transform['drop_input'] and transform['output'] != transform['input']:
-            data = data.drop(columns=transform['input'])
+            data = data.drop(transform['input'], axis=1)
     return data
 
 def get_transform(output, inp, func, params={}, drop_input=False):
@@ -103,14 +158,15 @@ def get_onehot_transform(x):
 def get_impute_null_transforms_for_dataset(data, add_flag=True):
     transforms = []
     for col_name in list(data):
+
         if data[col_name].dtype == 'object':
             imputation = data[col_name].mode()[0]
         else:
-            imputation = data[col_name].median()[0]
+            imputation = data[col_name].median()
         
         if add_flag:
             transforms.append(
-                get_transforms(
+                get_transform(
                     col_name+'_missing',
                     col_name,
                     'null_flag',
@@ -165,7 +221,7 @@ def get_onehot_tranforms_for_dataset(data):
         if data[col_name].dtype == 'object' and len(data[col_name].unique()) < 10:
             transforms = transforms + get_onehot_transform(data[col_name], col_name)
     
-def get_ihs_transforms_for_dataset(data, skew_threshold=1.14, kurtosis_threshold=2.4, level_threshold=20):
+def get_ihs_transforms_for_dataset(data, drop_input=False, skew_threshold=1, kurtosis_threshold=2, level_threshold=20):
     transforms = []
     for col_name in list(data):
         if data[col_name].dtype != 'object' and len(data[col_name].unique()) > level_threshold:
@@ -176,7 +232,8 @@ def get_ihs_transforms_for_dataset(data, skew_threshold=1.14, kurtosis_threshold
                         col_name+'_ihs',
                         col_name,
                         'ihs',
-                        {'ihs_factor':ihs_factor}
+                        {'ihs_factor':ihs_factor},
+                        drop_input
                     )
                 )
     
@@ -254,7 +311,7 @@ def get_group_matrix(data, group_dict):
     
     for col_name in group_dict.keys():
         group = [idx_map[col] for col in group_dict[col_name]]
-        group_matrix[idx_map[col_name] group] = 1
+        group_matrix[idx_map[col_name], group] = 1
     return group_matrix
         
 

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import functools
 
-def get_correlated_columns(data):
+def get_correlated_columns(data: pd.DataFrame):
     list_of_correlated_columns = []
     corr = data.corr()
     
@@ -18,7 +18,7 @@ def get_correlated_columns(data):
             
     return [list(filter(lambda t: t not in ('[', ', ', ']'), x.split("'"))) for x in set(list_of_correlated_columns)]
 
-def get_collinear_columns(data, eig_val_threshold = 0.0001):
+def get_collinear_columns(data: pd.DataFrame, eig_val_threshold = 0.0001):
     X = data.values
     col_name = list(data)
     drop_cols = []
@@ -39,7 +39,7 @@ def get_collinear_columns(data, eig_val_threshold = 0.0001):
     
     return drop_cols
 
-def get_non_numeric_columns(data):
+def get_non_numeric_columns(data: pd.DataFrame):
     non_numeric_columns = []
         
     for col_name in list(data):
@@ -48,7 +48,7 @@ def get_non_numeric_columns(data):
                 
     return non_numeric_columns
 
-def get_unary_columns(data):
+def get_unary_columns(data: pd.DataFrame):
     unary_columns = []
     
     for col_name in list(data):
@@ -151,12 +151,12 @@ def get_candidate_model_cols(curr_cols, all_cols, group_matrix=None):
             candidate_cols.append(random.choice(non_curr_cols))
     return candidate_cols
 
-def fast_bms(data, 
-             target, 
-             method='median', 
+def fast_bms(data: pd.DataFrame, 
+             target: pd.Series, 
+             method: str ='median', 
              weights=None, 
-             iterations=100000, 
-             burn=10000, 
+             iterations: int=100000, 
+             burn: int=10000, 
              prior=uniform, 
              group_matrix=None):
     
@@ -208,7 +208,23 @@ def fast_bms(data,
     )
         
         
-def backward_selection(data, target, weights=None, criteria='bic', group_matrix=None):
+def backward_selection(data: pd.DataFrame, 
+                       target: pd.Series, 
+                       weights=None, 
+                       criteria='bic', 
+                       group_matrix=None):
+    '''
+    Performs backwards selection for a linear regression
+    
+    Parameters
+    ----------
+    data: pd.DataFrame
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables
+    target: pd.Series
+        A pandas series containing the targets/endogenous variable
+    weights
+        A 
+    '''
     
     fast_ols_inputs = get_fast_ols_inputs(data.values, target.values, weights)
     tss = np.sum((target.values - target.values.mean())**2)
