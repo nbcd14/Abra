@@ -6,44 +6,23 @@ import numpy as np
 import pandas as pd
 import functools
 
-def get_correlated_columns(data: pd.DataFrame):
+def get_correlated_columns(data: pd.DataFrame, correlation_threshold=1):
     list_of_correlated_columns = []
     corr = data.corr()
     
     for col_name in list(corr):
-        correlated_columns = sorted(list(corr[col_name][corr[col_name]==1].index))
+        correlated_columns = sorted(list(corr[col_name][corr[col_name]>=correlation_threshold].index))
         if len(correlated_columns) > 1:
             str_correlated_columns = str(correlated_columns)
             list_of_correlated_columns.append(str_correlated_columns)
             
     return [list(filter(lambda t: t not in ('[', ', ', ']'), x.split("'"))) for x in set(list_of_correlated_columns)]
 
-def get_collinear_columns(data: pd.DataFrame, eig_val_threshold = 0.0001):
-    X = data.values
-    col_name = list(data)
-    drop_cols = []
-    cols = list(range(X.shape[1]))
-    
-    XtX = np.dot(X.T, X)
-    eig_vals, eig_vectors = np.linalg.eig(XtX)
-    
-    while np.abs(np.min(eig_vals)/np.max(eig_vals)) < eig_val_threshold:
-        
-        lowest_eig_val_pos = np.argmin(np.abs(eig_vals))
-        largest_eig_component = np.argmax(np.abs(eig_vectors[:, lowest_eig_val_pos]))
-        
-        drop_cols.append(cols[largest_eig_component])
-        cols.remove(cols[largest_eig_component])
-        
-        eig_vals, eig_vectors = np.linalg.eig(XtX[cols, :][:, cols])
-    
-    return drop_cols
-
-def get_non_numeric_columns(data: pd.DataFrame):
+def get_non_numeric_columns(data: pd.DataFrame, level_threshold=20):
     non_numeric_columns = []
         
     for col_name in list(data):
-        if data[col_name].dtype == 'object':
+        if data[col_name].dtype == 'object' or len(data[col_name].unique()) < level_threshold:
             non_numeric_columns.append(col_name)
                 
     return non_numeric_columns
