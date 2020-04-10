@@ -77,7 +77,24 @@ def get_numeric_columns(data, level_threshold=20):
             numeric_columns.append(col_name)
     return numeric_columns
     
+def b_spline(x, knots, degree, upper_bound, lower_bound, include_intercept):
+    '''
+    A wrapper for the patsy bs formula, used to create basis vectors for input series x.
+    '''
+    patsy_formula = "bs(x, knots={}, degree={}, upper_bound={}, lower_bound={}, include_intercept={})-1"
 
+    design_matrix = patsy.dmatrix(
+                        patsy_formula.format(
+                            knots,
+                            degree,
+                            upper_bound,
+                            lower_bound,
+                            include_intercept
+                        ), 
+                        {"x": floor(cap(x, upper_bound), lower_bound)}
+                    )
+    return np.asarray(design_matrix)
+    
 def get_square_transforms_for_dataset(data, include_cols=[]):
     '''
     Return a list of dicts used by the apply_tranforms to square variables.  
@@ -138,14 +155,16 @@ def get_pareto_outlier_cap_cutoff(x, tail_pct=0.01, alpha=0.01, use_mle=True, p1
     if use_mle:
         beta = np.min(tail)
         lam = 1/(np.log(tail/beta).mean())
+        return beta * alpha**(-1 / lam)
     else:
         q1 = tail.quantile(p1)
         q2 = tail.quantile(p2)
         if len(tail) > 100 and q2 > q1 and q1 > 0:
             lam = np.log((1 - p1) / (1 - p2)) / np.log(q2 / q1)
             beta = q1 * (1 - p1)**(1 / lam)
+            return beta * alpha**(-1 / lam)
             
-    return beta * alpha**(-1 / lam)
+    
 
 def get_pareto_outlier_floor_cutoff(x, tail_pct=0.01, alpha=0.01, use_mle=True, p1=0.1, p2=0.9):
     '''
@@ -251,7 +270,7 @@ def get_transform(output, inp, func, params={}, drop_input=False):
         'drop_input': drop_input
     }
     
-def get_onehot_transform(x: pd.Series):
+def get_onehot_transform(x: pd.Series, col_name):
     '''
     Takes a categorical variable and returns a list of dicts representing the transforms
     used by apply_transforms to one-hot encode the variable. Note flags are created for each
@@ -260,7 +279,7 @@ def get_onehot_transform(x: pd.Series):
     transforms = []
     for val in list(x.unique()):
         if val != x.mode()[0]:
-            tranforms.append(
+            transforms.append(
                 get_transform(
                     col_name + '_eq_' + str(val),
                     col_name,
@@ -381,9 +400,11 @@ def get_onehot_tranforms_for_dataset(data):
     categorical columns in the dataset.
     '''
     transforms = []
+    numeric_columns = get_numeric_columns(data)
     for col_name in list(data):
-        if data[col_name].dtype == 'object' and len(data[col_name].unique()) <= 20:
+        if col_name not in numeric_columns:
             transforms = transforms + get_onehot_transform(data[col_name], col_name)
+    return transforms
     
 def get_ihs_transforms_for_dataset(data, drop_input=False, skew_threshold=1, kurtosis_threshold=2):
     '''
@@ -489,7 +510,7 @@ def get_bspline_transforms_for_dataset(data, df=4, degree=3, include_cols=[], ex
         if col_name not in exclude_cols:
             transforms.append(
                 get_bspline_transform(
-                    data[col_name].
+                    data[col_name],
                     col_name,
                     df,
                     degree,
@@ -498,22 +519,25 @@ def get_bspline_transforms_for_dataset(data, df=4, degree=3, include_cols=[], ex
             )
     return transforms
 
-def b_spline(x, knots, degree, upper_bound, lower_bound, include_intercept):
+
+def get_standard_transforms_for_dataset(dataset):
     '''
-    A wrapper for the patsy bs formula, used to create basis vectors for input series x.
+    Returns a list of dicts representing imputation, cap, floor, onehot, and ihs transforms. The
+    list of dicts is used by apply_transforms to apply each transform to a dataset.
     '''
-    patsy_formula = "bs(x, knots={}, degree={}, upper_bound={}, lower_bound={}, include_intercept={})-1"
-    design_matrix = patsy.dmatrix(
-                        patsy_formula.format(
-                            knots,
-                            degree,
-                            upper_bound,
-                            lower_bound,
-                            include_intercept
-                        ), 
-                        {"x": x}
-                    )
-    return np.asarray(design_matrix)
+    
+    data = dataset.copy()
+    
+    null_transforms = get_impute_null_transforms_for_dataset(data)
+    data = apply_transforms(data, null_transforms)
+
+    cap_floor_transforms = get_cap_floor_transforms_for_dataset(data, use_mle=False)
+    data = apply_transforms(data, cap_floor_transforms)
+
+    ihs_transforms = get_ihs_transforms_for_dataset(data, drop_input=True)
+    onehot_transforms = get_onehot_tranforms_for_dataset(data)
+    
+    return null_transforms+cap_floor_transforms+onehot_transforms+ihs_transforms
 
 def get_group_dict(transforms):
     '''
@@ -531,7 +555,7 @@ def get_group_dict(transforms):
             for col_name in transform['output']:
                 group_dict[col_name] = transform['output']
         elif transform['func'] == 'square':
-            group_dict[transform['output']] = transform['input']
+            group_dict[transform['output']] = [transform['input']]
         elif transform['func'] == 'interaction':
             group_dict[transform['output']] = transform['input']
             

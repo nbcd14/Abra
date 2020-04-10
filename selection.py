@@ -28,6 +28,9 @@ def get_non_numeric_columns(data: pd.DataFrame, level_threshold=20):
     return non_numeric_columns
 
 def get_unary_columns(data: pd.DataFrame):
+    '''
+    Returns a list of all unary columns (i.e. columns with only a single value). These 
+    '''
     unary_columns = []
     
     for col_name in list(data):
@@ -250,7 +253,7 @@ def backward_selection(data: pd.DataFrame,
         optimal_model = curr_cols_list[np.argmin(adj_r_squared)]
     
     return (
-        optimal_model,
+        [list(data)[col] for col in optimal_model],
         pd.DataFrame({'BIC':bic,
                       'AIC':aic,
                       'Adj. R-squared':adj_r_squared,
@@ -310,7 +313,6 @@ def fast_backward_selection(data,
         aic.append(fit_model.aic)
         max_pvalue.append(max(pvalues))
         drop_groups.append(list(set(prev_cols) - set(curr_cols)))
-        print(len(curr_cols))
         
         if curr_cols == all_cols: prev_criterion_val = criterion_val        
         if prev_criterion_val < criterion_val: break
