@@ -6,28 +6,31 @@ import numpy as np
 import pandas as pd
 import functools
 
-def get_correlated_columns(data):
+def get_correlated_columns(data: pd.DataFrame, correlation_threshold=1):
     list_of_correlated_columns = []
     corr = data.corr()
     
     for col_name in list(corr):
-        correlated_columns = sorted(list(corr[col_name][corr[col_name]==1].index))
+        correlated_columns = sorted(list(corr[col_name][corr[col_name]>=correlation_threshold].index))
         if len(correlated_columns) > 1:
             str_correlated_columns = str(correlated_columns)
             list_of_correlated_columns.append(str_correlated_columns)
             
     return [list(filter(lambda t: t not in ('[', ', ', ']'), x.split("'"))) for x in set(list_of_correlated_columns)]
 
-def get_non_numeric_columns(data):
+def get_non_numeric_columns(data: pd.DataFrame, level_threshold=20):
     non_numeric_columns = []
         
     for col_name in list(data):
-        if data[col_name].dtype == 'object':
+        if data[col_name].dtype == 'object' or len(data[col_name].unique()) < level_threshold:
             non_numeric_columns.append(col_name)
                 
     return non_numeric_columns
 
-def get_unary_columns(data):
+def get_unary_columns(data: pd.DataFrame):
+    '''
+    Returns a list of all unary columns (i.e. columns with only a single value). These 
+    '''
     unary_columns = []
     
     for col_name in list(data):
@@ -130,12 +133,12 @@ def get_candidate_model_cols(curr_cols, all_cols, group_matrix=None):
             candidate_cols.append(random.choice(non_curr_cols))
     return candidate_cols
 
-def fast_bms(data, 
-             target, 
-             method='median', 
+def fast_bms(data: pd.DataFrame, 
+             target: pd.Series, 
+             method: str ='median', 
              weights=None, 
-             iterations=100000, 
-             burn=10000, 
+             iterations: int=100000, 
+             burn: int=10000, 
              prior=uniform, 
              group_matrix=None):
     
@@ -187,7 +190,23 @@ def fast_bms(data,
     )
         
         
-def backward_selection(data, target, weights=None, criteria='bic', group_matrix=None):
+def backward_selection(data: pd.DataFrame, 
+                       target: pd.Series, 
+                       weights=None, 
+                       criteria='bic', 
+                       group_matrix=None):
+    '''
+    Performs backwards selection for a linear regression
+    
+    Parameters
+    ----------
+    data: pd.DataFrame
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables
+    target: pd.Series
+        A pandas series containing the targets/endogenous variable
+    weights
+        A 
+    '''
     
     fast_ols_inputs = get_fast_ols_inputs(data.values, target.values, weights)
     tss = np.sum((target.values - target.values.mean())**2)
@@ -234,7 +253,7 @@ def backward_selection(data, target, weights=None, criteria='bic', group_matrix=
         optimal_model = curr_cols_list[np.argmin(adj_r_squared)]
     
     return (
-        optimal_model,
+        [list(data)[col] for col in optimal_model],
         pd.DataFrame({'BIC':bic,
                       'AIC':aic,
                       'Adj. R-squared':adj_r_squared,
@@ -294,7 +313,6 @@ def fast_backward_selection(data,
         aic.append(fit_model.aic)
         max_pvalue.append(max(pvalues))
         drop_groups.append(list(set(prev_cols) - set(curr_cols)))
-        print(len(curr_cols))
         
         if curr_cols == all_cols: prev_criterion_val = criterion_val        
         if prev_criterion_val < criterion_val: break
