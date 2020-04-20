@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import functools
 
-def get_correlated_columns(data: pd.DataFrame, correlation_threshold=1):
+def get_correlated_columns(data, correlation_threshold=1):
+    '''
+    Returns groups of variables in the dataset that have a correlation greater than the 
+    correlation_threshold.
+    '''
     list_of_correlated_columns = []
     corr = data.corr()
     
@@ -18,18 +22,21 @@ def get_correlated_columns(data: pd.DataFrame, correlation_threshold=1):
             
     return [list(filter(lambda t: t not in ('[', ', ', ']'), x.split("'"))) for x in set(list_of_correlated_columns)]
 
-def get_non_numeric_columns(data: pd.DataFrame, level_threshold=20):
+def get_non_numeric_columns(data):
+    '''
+    Returns a list of non-numeric columns (e.g. categorical variables) in the dataset.
+    '''
     non_numeric_columns = []
         
     for col_name in list(data):
-        if data[col_name].dtype == 'object' or len(data[col_name].unique()) < level_threshold:
+        if data[col_name].dtype == 'object':
             non_numeric_columns.append(col_name)
                 
     return non_numeric_columns
 
-def get_unary_columns(data: pd.DataFrame):
+def get_unary_columns(data):
     '''
-    Returns a list of all unary columns (i.e. columns with only a single value). These 
+    Returns a list of all unary columns (i.e. columns with only a single value). 
     '''
     unary_columns = []
     
@@ -41,19 +48,31 @@ def get_unary_columns(data: pd.DataFrame):
             
             
 def uniform(m):
+    '''
+    A uniform prior that can be passed to fast_bms.
+    '''
     return 1
 
 def get_binomial(n, p):
+    '''
+    Returns a binomial prior with parameters n and p, that can be passed to fast_bms.
+    '''
     def binomial(k):
         return (p**k) * ((1 - p)**(n - k))
     return binomial
     
 def get_beta_binomial(n, a, b):
+    '''
+    Returns a beta binomial prior with parameters n, a, and b, that can be passed to fast_bms.
+    '''
     def beta_binomial(k):
         return beta(k+a, n-k+b) / beta(a,b)
     return beta_binomial
 
 def get_fast_ols_inputs(X, y, weights=None):
+    '''
+    Returns the inputs for fast_ols (i.e. X'X, X'y, and y'y) in a dict.
+    '''
     if weights is None:
         weights = np.ones(len(X))
 
@@ -65,12 +84,24 @@ def get_fast_ols_inputs(X, y, weights=None):
     
 
 def fast_ols_beta_hat(XtX, Xty, var_idx=None):
+    '''
+    Returns the co-efficients for a linear model fit on the variables corresponding the indices 
+    in var_idx. The function takes as input the pre-computed matrices X'X and X'y, where X 
+    is the dataset with all candidate variables and y is a series containing the targets/endogenous 
+    variable.
+    '''
     if var_idx is None:
         var_idx = list(range(len(XtX)))
         
     return np.matmul(np.linalg.pinv(XtX[var_idx,:][:,var_idx]), Xty[var_idx])
 
 def fast_ols(XtX, Xty, yty, var_idx=None):
+    '''
+    Returns the co-efficients and residual sum of squares for a linear model fit on the
+    variables corresponding the indices in var_idx. The function takes as input the 
+    pre-computed matrices X'X, X'y and y'y, where X is the dataset with all candidate variables
+    and y is a series containing the targets/endogenous variable.
+    '''
     if var_idx is None:
         var_idx = list(range(len(XtX)))
         
@@ -122,6 +153,21 @@ def get_add_group(col, group_matrix):
 
 
 def get_candidate_model_cols(curr_cols, all_cols, group_matrix=None):
+    '''
+    The function is used in fast_bms at each iteration to create a new candidate model based on the
+    current model variables. To create the candidate model, the function either randomly adds or removes
+    a variable from the current model (with probability 0.5), or swaps a variable in the model (with 
+    probability 0.5).
+    
+    Parameters
+    ----------
+    curr_cols: list
+        A list of the current model variables
+    all_cols: list
+        A list of all candidate variables available
+    group_matrix: np.array
+        Currently not used
+    '''
     candidate_cols = curr_cols.copy()
     if np.random.rand() < 0.5:
         col = random.choice(all_cols)
@@ -133,14 +179,54 @@ def get_candidate_model_cols(curr_cols, all_cols, group_matrix=None):
             candidate_cols.append(random.choice(non_curr_cols))
     return candidate_cols
 
-def fast_bms(data: pd.DataFrame, 
-             target: pd.Series, 
-             method: str ='median', 
+def fast_bms(data, 
+             target, 
+             method='median', 
              weights=None, 
-             iterations: int=100000, 
-             burn: int=10000, 
+             iterations=100000, 
+             burn=10000, 
              prior=uniform, 
              group_matrix=None):
+    '''
+    Performs bayesian model selection. The function samples the model space proportional to
+    the posterior model probability (i.e. proportional to prior(model_size)*e^(-BIC/2)).
+    
+    Parameters
+    ----------
+    data: pd.DataFrame
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables
+    target: pd.Series
+        A pandas series containing the targets/endogenous variable
+    method: str
+        One of 'max', 'median', or 'average'. If 'max', the function returns the model that 
+        maximizes posterior probability. If 'median', the function returns the a model where 
+        all the variables in the model occur in at least half the models sampled. If 'average'
+        the average model (weighted by the posterior probability) is returned.
+    weights: np.array or None
+        An array with the weights to use for weighted regression. Use None for regular OLS.
+    iterations: int
+        The number of iterations to run BMS (i.e. the number of models to samples)
+    burn: int
+        The number of initial iterations to discard. fast_bms samples burn+iterations models.
+    prior: function
+        A python function describing the model prior that takes the size of a model (i.e. 
+        the number of variables) and returns the probability of the model. The function
+        uniform or the functions returned by get_binomial and get_beta_binomial can be used 
+        as priors in addition to custom priors.
+    group_matrix:
+        Not currently used in fast_bms.
+        
+    Returns
+    ---------
+    A tuple with:
+        1. the co-efficients of the optimal model (with 0 co-efficients for variables not in 
+        the model)
+        2. a table of variables sorted by the percentage of time the variable was included in 
+        a model (PIP)
+        3. A list with prior(model_size)*e^(-BIC/2) for each of the models sampled
+        4. A list of the co-efficients for the models sampled
+        
+    '''
     
     fast_ols_inputs = get_fast_ols_inputs(data.values, target.values, weights=None)
     n, p = data.shape
@@ -190,22 +276,38 @@ def fast_bms(data: pd.DataFrame,
     )
         
         
-def backward_selection(data: pd.DataFrame, 
-                       target: pd.Series, 
+def backward_selection(data, 
+                       target, 
                        weights=None, 
                        criteria='bic', 
                        group_matrix=None):
     '''
-    Performs backwards selection for a linear regression
+    Performs backwards selection for linear regression. At each iterations the model drops
+    the variable that increases the residual sum of squares the least, and computes AIC,
+    BIC and adjusted R-squared. Note, to determine the variable to drop at each iteration,
+    each variable is dropped in turn and the model is refit (i.e. at iteration i, the model is 
+    refit p-i+1 times).
     
     Parameters
     ----------
     data: pd.DataFrame
-        A pandas DataFrame containing the candidate set of predictors/exogenous variables
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables.
     target: pd.Series
-        A pandas series containing the targets/endogenous variable
-    weights
-        A 
+        A pandas series containing the targets/endogenous variable.
+    weights: np.array or None
+        An array with the weights to use for weighted regression. Use None for regular OLS.
+    criteria: str
+        One of 'bic', 'aic' or 'adj. R-squared'. The model returned optimizes this metric.
+    group_matrix: np.array or None
+        An matrix describing which variables should be dropped together. The ij-th entry is 1 
+        if variable i must be dropped if variable j is dropped and 0 otherwise. Note groups of
+        variables dropped together are considered the same as a single variable.
+    
+    Returns
+    ----------
+    1. A list of columns describing the best model with respect to the criteria specified
+    2. A table (pandas DataFrame) with the AIC, BIC, Adj R-squared, and RSS for the model fit 
+    at each iteration 
     '''
     
     fast_ols_inputs = get_fast_ols_inputs(data.values, target.values, weights)
@@ -272,6 +374,41 @@ def fast_backward_selection(data,
                             criteria='bic', 
                             group_matrix=None, 
                             p_value_threshold=0.001):
+    '''
+    Performs backwards selection for any statsmodel model. At each iterations the model drops the 
+    refit_freq least significant variables, using the wald test and refits the model, to calculate 
+    AIC, BIC and the max p-value. Selection terminates when performance measured by the criteria
+    stops improving. If the criteria is 'p-value', selection terminates when every variable has a
+    p-value less than p_value_threshold.
+    
+    Parameters
+    ----------
+    data: pd.DataFrame
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables.
+    target: pd.Series
+        A pandas series containing the targets/endogenous variable.
+    model: statsmodel object
+        A statsmodel object with methods .fit and .wald_test
+    model_kwargs: dict
+        Additional parameters to pass to model during initialization (e.g. {'family':sm.families.Binomial()})
+    refit_freq: int
+        The number of variables to drop before refitting the model.
+    criteria: str
+        One of 'bic', 'aic' or 'p-value'. Selection terminate when this metrics stops improving.
+    group_matrix: np.array or None
+        An matrix describing which variables should be dropped together. The ij-th entry is 1 
+        if variable i must be dropped if variable j is dropped and 0 otherwise. Note groups of
+        variables dropped together are considered the same as a single variable.
+    p_value_threshold: float
+        If the criteria is 'p-value', selection terminates when every variable has a
+        p-value less than p_value_threshold.
+    
+    Returns
+    ----------
+    1. A list of columns describing the best model with respect to the criteria specified
+    2. A table (pandas DataFrame) with the AIC, BIC, and max p-value for the model fit 
+    at each iteration 
+    '''
     
     X = data.values
     y = target.values
@@ -338,12 +475,20 @@ def fast_backward_selection(data,
     )
     
 def logistic_neg_loglikelihood(beta_hat, x, y, weights, group_matrix, C):
+    '''
+    Used in group_lasso_selection to compute the negative log likelihood for logistic regression 
+    with L1 regularization.
+    '''
     y_hat = 1/(1 + np.exp(-np.matmul(x, beta_hat)))
     loglikelihood = np.dot(y * np.log(y_hat) + (1-y) * np.log(1-y_hat), weights)
     penalty = np.sum(np.matmul(group_matrix, beta_hat**2)**0.5)
     return -loglikelihood * C + penalty
 
 def logistic_neg_gradient(beta_hat, x, y, weights, group_matrix, C):
+    '''
+    Used in group_lasso_selection to compute the gradient of negative log likelihood for logistic 
+    regression with L1 regularization.
+    '''
     y_hat = 1/(1 + np.exp(-np.matmul(x, beta_hat)))
     logistic_gradient = np.dot(x.T, np.multiply(y-y_hat, weights))
     penalty_gradient = beta_hat * (np.matmul(group_matrix, beta_hat**2)**-0.5)
@@ -352,6 +497,23 @@ def logistic_neg_gradient(beta_hat, x, y, weights, group_matrix, C):
 from scipy.optimize import minimize
 
 def group_lasso_selection(data, target, weights=None, group_matrix=None, C=1):
+    '''
+    Performs group lasso for logistic regression and returns the regularized co-efficients.
+    
+    Parameters
+    ----------
+    data: pd.DataFrame
+        A pandas DataFrame containing the candidate set of predictors/exogenous variables.
+    target: pd.Series
+        A pandas series containing the targets/endogenous variable.
+    weights: np.array or None
+        An array with the weights to use for weighted regression. Use None for non-weighted 
+        regresion.
+    group_matrix: np.array or None
+        An matrix describing which variables should be  together. The ij-th entry is 1 
+        if variable i must be dropped if variable j is dropped and 0 otherwise. Note groups of
+        variables dropped together are considered the same as single variable.
+    '''
     X = data.values
     y = target.values
     

@@ -26,7 +26,7 @@ def get_ihs_factor(x):
     params_init = np.array([0, 1, 1])
     y = norm.ppf((x.rank() - 0.5) / len(x))
     res_lsq = least_squares(fun, params_init, args = (x, y))
-    return res_lsq.x[2]
+    return res_lsq.x[2].item()
 
 
 def angular(x, lower=0, upper=1):
@@ -162,7 +162,7 @@ def get_pareto_outlier_cap_cutoff(x, tail_pct=0.01, alpha=0.01, use_mle=True, p1
         if len(tail) > 100 and q2 > q1 and q1 > 0:
             lam = np.log((1 - p1) / (1 - p2)) / np.log(q2 / q1)
             beta = q1 * (1 - p1)**(1 / lam)
-            return beta * alpha**(-1 / lam)
+            return (beta * alpha**(-1 / lam)).item()
             
     
 
@@ -284,7 +284,7 @@ def get_onehot_transform(x: pd.Series, col_name):
                     col_name + '_eq_' + str(val),
                     col_name,
                     'flag',
-                    {'value': val}
+                    {'value': val.item()}
                 )
             )
     return transforms
@@ -402,7 +402,7 @@ def get_onehot_tranforms_for_dataset(data):
     transforms = []
     numeric_columns = get_numeric_columns(data)
     for col_name in list(data):
-        if col_name not in numeric_columns:
+        if col_name not in numeric_columns and len(data[col_name].unique()) > 2:
             transforms = transforms + get_onehot_transform(data[col_name], col_name)
     return transforms
     
@@ -534,10 +534,9 @@ def get_standard_transforms_for_dataset(dataset):
     cap_floor_transforms = get_cap_floor_transforms_for_dataset(data, use_mle=False)
     data = apply_transforms(data, cap_floor_transforms)
 
-    ihs_transforms = get_ihs_transforms_for_dataset(data, drop_input=True)
     onehot_transforms = get_onehot_tranforms_for_dataset(data)
     
-    return null_transforms+cap_floor_transforms+onehot_transforms+ihs_transforms
+    return null_transforms+cap_floor_transforms+onehot_transforms
 
 def get_group_dict(transforms):
     '''
