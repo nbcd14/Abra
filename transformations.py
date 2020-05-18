@@ -631,5 +631,50 @@ def prune_transforms(transforms, required_cols):
     return reversed(required_transforms), parentless
                        
     
-        
+def safe_make_list(item):
+    '''Helper function for prune_transforms.'''
+    if isinstance(item, list):
+        return item
+    else: 
+        return [item]
+
+def prune_transforms(transforms, required_cols):
+    '''
+    Removes transforms from the transforms provided that not needed to create
+    the required_cols. The function is used after variable selection to remove
+    transforms used to create variables in the candidate set that did not make
+    it into the final model.
+    
+    Returns
+    --------
+    required_transforms: list of dicts
+        The transforms required to create the required_cols
+    parentless: list of str
+        The names of the input columns required to make required_cols
+    '''
+
+    children = required_cols.copy()
+    required_transforms = []
+    parentless = []
+    
+    while True:
+        parents = []
+        for child in children:
+            parent_found = False
+            for transform in transforms:
+                if child in safe_make_list(transform['output']):
+                    required_transforms.append(transform)
+                    for input_col in safe_make_list(transform['input']):
+                        if child != input_col:
+                            parents.append(input_col)
+                            parent_found = True
+            if not parent_found:
+                parentless.append(child)
+        if len(parents) == 0:
+            break
+        children = parents
+    
+    required_transforms.reverse()
+    
+    return required_transforms, parentless       
          
