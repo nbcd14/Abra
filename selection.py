@@ -510,9 +510,11 @@ def group_lasso_selection(data, target, weights=None, group_matrix=None, C=1):
         An array with the weights to use for weighted regression. Use None for non-weighted 
         regresion.
     group_matrix: np.array or None
-        An matrix describing which variables should be  together. The ij-th entry is 1 
-        if variable i must be dropped if variable j is dropped and 0 otherwise. Note groups of
-        variables dropped together are considered the same as single variable.
+        An matrix describing which variables should be included in the model together. The ij-th 
+        entry is 1 if variable j must be non-zero coefficient if variable i has a non-zero coefficient  
+        and 0 otherwise.
+    C: float
+        The regularization parameter. A lower C increase L1 regularization and model sparsity.
     '''
     X = data.values
     y = target.values
